@@ -1,0 +1,191 @@
+import pygame
+import sys
+import os
+import json
+
+pygame.init()
+
+WIDTH, HEIGHT = 800, 600
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GRAY = (200, 200, 200)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+
+FONT = pygame.font.SysFont("Arial", 30)
+FONT_BOSS = pygame.font.SysFont("Arial", 28, bold=True)
+
+class Sprite:
+    @staticmethod
+    def load(path, size=(100, 100)):
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            return pygame.transform.scale(img, size)
+        except:
+            print(f"Erro ao carregar sprite: {path}")
+            return pygame.Surface(size, pygame.SRCALPHA)
+
+class Botao:
+    def __init__(self, texto, pos, nome, ativo=True):
+        self.texto = texto
+        self.x, self.y = pos
+        self.nome = nome
+        self.ativo = ativo
+        self.anim = 1.0
+
+    def desenhar(self, screen):
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        hover = self.x <= mouse_x <= self.x+200 and self.y <= mouse_y <= self.y+50
+        cor = GRAY if self.ativo else (180, 180, 180)
+        if hover and self.ativo:
+            cor = (160, 160, 160)
+        scale = 1.0 + 0.05 * (1 - self.anim)
+        w, h = int(200 * scale), int(50 * scale)
+        rect = pygame.Rect(self.x + 100 - w//2, self.y + 25 - h//2, w, h)
+        pygame.draw.rect(screen, cor, rect)
+        screen.blit(FONT.render(self.texto, True, BLACK), (rect.x + 40, rect.y + 10))
+        return hover, rect
+
+class Inimigo:
+    def __init__(self, dados):
+        self.sprite_path = dados["sprite"]
+        self.vida_max = dados["vida"]
+        self.vida = self.vida_max
+        self.recompensa = dados["recompensa"]
+        self.is_boss = dados.get("boss", False)
+        self.sprite = Sprite.load(self.sprite_path)
+        self.rect = pygame.Rect(350, 200, 100, 100)
+
+    def desenhar(self, screen):
+        screen.blit(self.sprite, self.rect)
+        if self.is_boss:
+            x = self.rect.centerx - 80
+            y = self.rect.top - 60
+            barra_img = Sprite.load("sprites/barra_de_vida.png", (160, 40))
+            screen.blit(barra_img, (x, y))
+            screen.blit(FONT_BOSS.render("Chef Toro", True, BLACK), (x + 40, y - 25))
+            ratio = self.vida / self.vida_max
+            pygame.draw.rect(screen, GREEN, (x + 20, y + 15, int(120 * ratio), 10))
+        else:
+            ratio = self.vida / self.vida_max
+            pygame.draw.rect(screen, BLACK, (self.rect.x, self.rect.y - 20, 100, 10), 2)
+            pygame.draw.rect(screen, RED, (self.rect.x, self.rect.y - 20, int(100 * ratio), 10))
+
+class Game:
+    def __init__(self):
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("Neko Slicer — Refatorado")
+        self.clock = pygame.time.Clock()
+        self.running = True
+
+        self.estado = "menu"
+        self.fase = 1
+        self.dano = 5
+        self.moedas = 0
+        self.upgrade = 20
+        self.save_index = None
+        self.inimigos = self.carregar_inimigos()
+        self.indice = 0
+        self.inimigo = Inimigo(self.inimigos[self.indice])
+        self.vitorias = 0
+
+        self.botoes = {
+            "novo": Botao("NOVO JOGO", (300, 200), "novo"),
+            "carregar": Botao("CARREGAR SAVE", (300, 270), "carregar", ativo=self.tem_save()),
+            "opcoes": Botao("OPÇÕES", (300, 340), "opcoes"),
+            "sair": Botao("SAIR", (300, 410), "sair"),
+        }
+
+    def tem_save(self):
+        os.makedirs("saves", exist_ok=True)
+        return any(os.path.exists(f"saves/save{i+1}.json") for i in range(3))
+
+    def carregar_inimigos(self):
+        return [
+            {"vida": 50, "recompensa": 3, "sprite": "sprites/inimigo1.png"},
+            {"vida": 75, "recompensa": 5, "sprite": "sprites/inimigo2.png"},
+            {"vida": 100, "recompensa": 7, "sprite": "sprites/inimigo3.png"},
+            {"vida": 300, "recompensa": 20, "sprite": "sprites/chef_toro.png", "boss": True},
+        ]
+
+    def atualizar_inimigo(self):
+        if self.indice < len(self.inimigos):
+            self.inimigo = Inimigo(self.inimigos[self.indice])
+
+    def salvar(self):
+        if self.save_index is None:
+            return
+        data = {
+            "fase": self.fase,
+            "indice": self.indice,
+            "vida": self.inimigo.vida,
+            "dano": self.dano,
+            "moedas": self.moedas,
+            "upgrade": self.upgrade
+        }
+        with open(f"saves/save{self.save_index+1}.json", 'w') as f:
+            json.dump(data, f)
+
+    def loop(self):
+        while self.running:
+            self.screen.fill(WHITE)
+            self.eventos()
+            self.atualiza()
+            pygame.display.flip()
+            self.clock.tick(60)
+
+        pygame.quit()
+        sys.exit()
+
+    def eventos(self):
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                self.salvar()
+                self.running = False
+            if self.estado == "menu" and e.type == pygame.MOUSEBUTTONDOWN:
+                mx, my = pygame.mouse.get_pos()
+                for nome, botao in self.botoes.items():
+                    hover, rect = botao.desenhar(self.screen)
+                    if hover and rect.collidepoint(mx, my) and botao.ativo:
+                        if nome == "novo":
+                            self.estado = "jogo"
+                        elif nome == "carregar":
+                            self.estado = "jogo"  # mock
+                        elif nome == "opcoes":
+                            pass
+                        elif nome == "sair":
+                            self.salvar()
+                            self.running = False
+            if self.estado == "jogo" and e.type == pygame.MOUSEBUTTONDOWN:
+                if self.inimigo.rect.collidepoint(e.pos):
+                    self.inimigo.vida -= self.dano
+                if 650 <= e.pos[0] <= 780 and 500 <= e.pos[1] <= 550:
+                    if self.moedas >= self.upgrade:
+                        self.moedas -= self.upgrade
+                        self.dano += 5
+                        self.upgrade += 15
+            if self.estado == "jogo" and e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_ESCAPE:
+                    self.estado = "menu"
+
+    def atualiza(self):
+        if self.estado == "menu":
+            self.screen.blit(FONT.render("Neko Slicer", True, BLACK), (300, 100))
+            for botao in self.botoes.values():
+                botao.desenhar(self.screen)
+        elif self.estado == "jogo":
+            self.inimigo.desenhar(self.screen)
+            if self.inimigo.vida <= 0:
+                self.moedas += self.inimigo.recompensa
+                self.indice += 1
+                if self.indice < len(self.inimigos):
+                    self.atualizar_inimigo()
+                else:
+                    self.estado = "vitoria"
+            self.screen.blit(FONT.render(f"Dano: {self.dano}", True, BLACK), (30, 30))
+            self.screen.blit(FONT.render(f"Moedas: {self.moedas}", True, BLACK), (30, 70))
+            pygame.draw.rect(self.screen, (0, 255, 0), (650, 500, 130, 50))
+            self.screen.blit(FONT.render("UPGRADE", True, BLACK), (665, 510))
+
+if __name__ == "__main__":
+    Game().loop()
